@@ -121,9 +121,7 @@ OPENAI_API_KEY=sk-...
 | File | Purpose |
 |------|---------|
 | `example.py` | Report analysis agent with structured outputs |
-| `langgraph_agent_boilerplate.py` | Generic agent boilerplate (ReAct pattern) |
-| `test_langgraph_agent.py` | Test suite |
-| `requirements.txt` | Dependencies |
+| `requirements.txt` | Dependencies (supports Anthropic, OpenAI, Google) |
 | `QUICK_REFERENCE.md` | Cheat sheet for the interview |
 
 ## LangSmith
