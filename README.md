@@ -1,250 +1,133 @@
-# LangGraph Agent Boilerplate
+# LangGraph Report Analysis Agent
 
-A clean, well-documented boilerplate for building AI agents using LangGraph and Claude. Perfect for interviews or learning LangGraph fundamentals.
+A multi-node LangGraph agent that analyzes reports using structured outputs and per-node prompts.
 
 ## Quick Start
 
-### 1. Install Dependencies
-
 ```bash
+# Clone
+git clone https://github.com/michaellevinger/langgraph-agent-boilerplate.git
+cd langgraph-agent-boilerplate
+
+# Install
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-# or
-uv pip install -r requirements.txt
-```
 
-### 2. Set Environment Variables
+# Configure (create .env file)
+echo 'ANTHROPIC_API_KEY=your-key-here' > .env
+echo 'LANGSMITH_API_KEY=your-langsmith-key' >> .env
+echo 'LANGCHAIN_TRACING_V2=true' >> .env
+echo 'LANGCHAIN_PROJECT=5x' >> .env
 
-```bash
-export ANTHROPIC_API_KEY="your-api-key-here"
-
-# Optional: Enable LangSmith tracing
-export LANGSMITH_API_KEY="your-langsmith-key"
-export LANGCHAIN_TRACING_V2=true
-```
-
-### 3. Run Example
-
-```bash
+# Run
 python example.py
-```
-
-### 4. Run Tests
-
-```bash
-pytest test_langgraph_agent.py -v
-```
-
-## What's Included
-
-- **`langgraph_agent_boilerplate.py`** - Main boilerplate with extensive documentation
-- **`example.py`** - Simple working examples
-- **`test_langgraph_agent.py`** - Comprehensive test suite (23 tests)
-- **`requirements.txt`** - All dependencies
-- **`QUICK_REFERENCE.md`** - Handy cheat sheet
-
-## Basic Usage
-
-```python
-from langgraph_agent_boilerplate import create_agent_graph
-from langchain_core.messages import HumanMessage
-from langchain_core.tools import tool
-
-# Define a tool
-@tool
-def get_weather(location: str) -> str:
-    """Get the current weather for a location."""
-    return f"Weather in {location}: sunny, 72°F"
-
-# Create agent with tools
-agent = create_agent_graph(tools=[get_weather])
-
-# Run conversation
-result = agent.invoke(
-    {"messages": [HumanMessage(content="What's the weather in NYC?")]},
-    config={"configurable": {"thread_id": "user-123"}}
-)
-
-# Get response
-print(result["messages"][-1].content)
 ```
 
 ## Architecture
 
 ```
-START → [Agent] → Needs tools?
-            ↓         ↓    ↓
-            ↓       Yes   No
-            ↓         ↓    ↓
-            ↓     [Tools] END
-            ↓         ↓
-            └─────────┘
-
-State: {"messages": [HumanMessage, AIMessage, ToolMessage, ...]}
-Persistence: MemorySaver (remembers conversation history)
+START
+  ↓
+[Extract Metrics]   ← prompt: "extract KPIs..."     → ExtractedMetrics
+  ↓
+[Identify Trends]   ← prompt: "find patterns..."    → TrendAnalysis
+  ↓
+[Flag Anomalies]    ← prompt: "spot outliers..."     → AnomalyReport
+  ↓
+[Summarize]         ← prompt: "synthesize..."        → AnalysisSummary
+  ↓
+END
 ```
 
-### Key Concepts
+Each node:
+1. Has its own **system prompt** (specialized persona)
+2. Returns a **Pydantic model** (structured output)
+3. Passes structured data to the next node via state
 
-1. **State** - The conversation history and context
-2. **Nodes** - Steps in the workflow (agent reasoning, tool execution)
-3. **Edges** - Connections between nodes (conditional routing)
-4. **Checkpointing** - Saves state after each step (enables memory)
+## Key Patterns
 
-## Examples
-
-### Simple Conversation
+### Structured Outputs
 
 ```python
-agent = create_agent_graph()
+from pydantic import BaseModel, Field
 
-result = agent.invoke(
-    {"messages": [HumanMessage(content="What is 2+2?")]},
-    config={"configurable": {"thread_id": "math-1"}}
-)
+class MyOutput(BaseModel):
+    result: str = Field(description="The result")
+    confidence: str = Field(description="high, medium, or low")
+
+structured_llm = llm.with_structured_output(MyOutput)
+response = structured_llm.invoke([...])  # Returns MyOutput instance
 ```
 
-### Multi-Turn Conversation
+### Per-Node Prompts
 
 ```python
-agent = create_agent_graph()
-config = {"configurable": {"thread_id": "chat-1"}}
-
-# First message
-agent.invoke(
-    {"messages": [HumanMessage(content="My name is Alice")]},
-    config=config
-)
-
-# Follow-up (agent remembers)
-result = agent.invoke(
-    {"messages": [HumanMessage(content="What's my name?")]},
-    config=config  # Same thread_id!
-)
-# Response: "Your name is Alice"
+def my_node(state: MyState) -> dict:
+    structured_llm = llm.with_structured_output(MyOutput)
+    response = structured_llm.invoke([
+        SystemMessage(content="You are a specialist in X..."),
+        HumanMessage(content=f"Analyze: {state.data}"),
+    ])
+    return {"my_field": response}
 ```
 
-### Tool Usage
+### Custom State
 
 ```python
-@tool
-def calculate(expression: str) -> str:
-    """Evaluate a math expression."""
-    return str(eval(expression))
-
-agent = create_agent_graph(tools=[calculate])
-
-result = agent.invoke(
-    {"messages": [HumanMessage(content="What is 15 * 23?")]},
-    config={"configurable": {"thread_id": "calc-1"}}
-)
-# Agent will use the calculator tool
+class MyState(BaseModel):
+    input_data: str = ""
+    step_1_result: Step1Output | None = None
+    step_2_result: Step2Output | None = None
 ```
 
-## Files to Keep
+### Building the Graph
 
-**Essential:**
-- `langgraph_agent_boilerplate.py` - Main code
-- `test_langgraph_agent.py` - Tests
-- `example.py` - Working examples
-- `requirements.txt` - Dependencies
-- `README.md` - This file
-- `QUICK_REFERENCE.md` - Cheat sheet
+```python
+graph = StateGraph(MyState)
+graph.add_node("step_1", step_1_node)
+graph.add_node("step_2", step_2_node)
+graph.set_entry_point("step_1")
+graph.add_edge("step_1", "step_2")
+graph.add_edge("step_2", END)
+app = graph.compile(checkpointer=MemorySaver())
+```
 
-**Optional:**
-- `visualize_graph.py` - Generate graph diagrams
-- `agent_graph.png` - Visual representation
+## Switching LLM Providers
 
-**Delete the rest** - All other files are debugging artifacts from setup.
+The example uses Anthropic/Claude. To switch to OpenAI:
 
-## Testing
+```python
+# Replace:
+from langchain_anthropic import ChatAnthropic
+llm = ChatAnthropic(model="claude-sonnet-4-6", temperature=0)
 
+# With:
+from langchain_openai import ChatOpenAI
+llm = ChatOpenAI(model="gpt-4o", temperature=0)
+```
+
+Set the appropriate env var:
 ```bash
-# Run all tests
-pytest test_langgraph_agent.py -v
+# For Anthropic
+ANTHROPIC_API_KEY=sk-ant-...
 
-# Run with coverage
-pytest test_langgraph_agent.py --cov=langgraph_agent_boilerplate
-
-# Run specific test
-pytest test_langgraph_agent.py::TestBasicWorkflow -v
+# For OpenAI
+OPENAI_API_KEY=sk-...
 ```
 
-## Common Interview Tasks
+## Files
 
-### Add a New Tool
+| File | Purpose |
+|------|---------|
+| `example.py` | Report analysis agent with structured outputs |
+| `langgraph_agent_boilerplate.py` | Generic agent boilerplate (ReAct pattern) |
+| `test_langgraph_agent.py` | Test suite |
+| `requirements.txt` | Dependencies |
+| `QUICK_REFERENCE.md` | Cheat sheet for the interview |
 
-```python
-@tool
-def search_web(query: str) -> str:
-    """Search the web."""
-    # Implementation here
-    return f"Results for {query}"
+## LangSmith
 
-agent = create_agent_graph(tools=[search_web])
-```
+Traces appear at https://smith.langchain.com under the project specified in `LANGCHAIN_PROJECT`.
 
-### Add System Prompt
-
-```python
-from langchain_core.messages import SystemMessage, HumanMessage
-
-# Prepend system message to conversation
-agent.invoke({
-    "messages": [
-        SystemMessage(content="You are a helpful coding assistant."),
-        HumanMessage(content="Help me debug this code")
-    ]
-}, config={"configurable": {"thread_id": "dev-1"}})
-```
-
-### Streaming Responses
-
-```python
-for chunk in agent.stream(
-    {"messages": [HumanMessage(content="Tell me a story")]},
-    config={"configurable": {"thread_id": "story-1"}}
-):
-    print(chunk)  # Real-time updates
-```
-
-## Model Configuration
-
-Using Claude Sonnet 4.6 by default. To change:
-
-```python
-# In langgraph_agent_boilerplate.py, line ~374:
-llm = ChatAnthropic(
-    model="claude-opus-4-7",  # or claude-haiku-4-5-20251001
-    temperature=0,
-)
-```
-
-## Troubleshooting
-
-### "No module named 'langgraph'"
-```bash
-pip install -r requirements.txt
-```
-
-### "Authentication error"
-```bash
-# Check API key is set
-echo $ANTHROPIC_API_KEY
-```
-
-### "Model not found"
-Make sure using a valid Claude 4 model:
-- `claude-sonnet-4-6` (balanced, default)
-- `claude-opus-4-7` (most capable)
-- `claude-haiku-4-5-20251001` (fastest, cheapest)
-
-## Resources
-
-- [LangGraph Docs](https://langchain-ai.github.io/langgraph/)
-- [LangChain Tools](https://python.langchain.com/docs/modules/tools/)
-- [Claude API Docs](https://docs.anthropic.com/)
-- [LangSmith](https://smith.langchain.com/) - Observability platform
-
-## License
-
-MIT - Use freely for interviews, projects, or learning!
+Each node shows up as a separate span with its prompt, structured output, token usage, and latency.
